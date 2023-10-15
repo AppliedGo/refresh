@@ -14,16 +14,14 @@ func TestAPIClient_token(t *testing.T) {
 	client := func(n int, apiClient *APIClient, done <-chan struct{}, wg *sync.WaitGroup) {
 		for {
 			select {
-			case _, ok <-done; !ok:
+			case <-done:
 				wg.Done()
 				log.Printf("Client %d done\n", n)
 				return
 			default:
 				token, err := apiClient.token()
-				if err != nil {
-					log.Printf("Client %d error: %s\n", n, err)
-				}
-				log.Printf("Client %d token: %s\n", n, token)
+				log.Printf("Client %d token: %s, err: %v\n", n, token, err)
+				time.Sleep(lifeSpan / 5)
 			}
 		}
 	}

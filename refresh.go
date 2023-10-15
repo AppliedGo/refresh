@@ -59,52 +59,81 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
+	"log"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"crypto/rand"
 	rnd "math/rand"
 )
 
+const (
+	lifeSpan         = 100 * time.Millisecond
+	failureRate      = 0.2
+	apiErrorDuration = 2 * lifeSpan
+)
+
+type tokenResponse struct {
+	Token string
+	Err   error
+}
+
 type APIClient struct {
-	tok chan string // The `tok` channel delivers the current token.
-	err chan error  // `apiErr` contains an error, if any.
-	/* More client stuff follows, probably */
+	tok chan tokenResponse
+	g   *singleflight.Group
 }
 
 func NewAPIClient() *APIClient {
 	a := &APIClient{
-		tok: make(chan string),
-		err: make(chan error, 1),
+		tok: make(chan tokenResponse),
+		g:   &singleflight.Group{},
 	}
 	go a.refreshToken() // This call sets a.token and a.apiErr.
 	return a
 }
 
-// `authorize()` simulates fetching a new access token that expires after 30 minutes.
-func authorize() (token string, lifespan int, err error) {
+var tempError bool
+
+// `authorize()` simulates fetching a new access token that expires after `lifespan` milliseconds.
+func authorize() (token string, lifespan time.Duration, err error) {
 	b := make([]byte, 8)
+
 	_, err = rand.Read(b)
-	if err == nil {
-		if rnd.Intn(100) < 20 {
-			return "", 0, fmt.Errorf("random error")
-		}
+	if err != nil {
+		return "randError", lifeSpan, err
 	}
-	return hex.EncodeToString(b), 1, err
+
+	if rnd.Float64() < failureRate && !tempError {
+		log.Println("API error")
+		tempError = true
+		go func() {
+			<-time.After(apiErrorDuration)
+			log.Println("API error resolved")
+			tempError = false
+		}()
+	}
+
+	if tempError {
+		return "tempError", lifeSpan, fmt.Errorf("temporary API error")
+	}
+
+	return hex.EncodeToString(b), lifeSpan, err
+
 }
 
 // The `token()` method returns the current token or an error. Here is where the future is avalutated
 func (a *APIClient) token() (string, error) {
-	if len(a.err) > 0 { // works because tokenErrorCh is buffered
-		return "", <-a.err
-	}
-	return <-a.tok, nil
+	t := <-a.tok
+	return t.Token, t.Err
 }
 
 // refreshToken starts a goroutine that fetches a new access token from the Amadeus authorization API if there is none yet, or if the current one expires. It returns channels for returning the current token, or an error if the token could not be fetched.
 func (a *APIClient) refreshToken() {
 	var token string
-	var expiration int
+	var expiration time.Duration
 	var err error
+	// var once *sync.Once
 
 	expired := time.After(0) // The timer fires immediately. This makes the `for` loop fetch a new token right away in the first iteration.
 
@@ -112,19 +141,29 @@ func (a *APIClient) refreshToken() {
 		select {
 		// The expiration timer has fired and wrote the current time to `expired`.
 		case <-expired:
-			// Fetch a new token from the API.
-			token, expiration, err = authorize()
-			if err != nil {
-				token = "ERROR"
-				a.err <- err
-				return
+			type res struct {
+				t string
+				e time.Duration
 			}
-			// Set a new timer to fire before the token expires.
-			expired = time.After(time.Duration(expiration*1000-100) * time.Millisecond)
+			// Fetch a new token from the API.
+			// The singleflight group `g` ensures that only one goroutine fetches the token at a time. All other goroutines that use the same key (a.token) will block and receive the shared result from g.Do()`.
+			r, err, _ := a.g.Do(token, func() (any, error) {
+				// This is a closure; we can set the outer variables directly.
+				token, expiration, err = authorize()
+				return res{token, expiration}, err
+			})
+			token = r.(res).t
+			expiration = r.(res).e
+			if err != nil {
+				a.tok <- tokenResponse{Token: token, Err: err}
 
+			}
+			// Set a new timer to fire shortly before the token expires.
+			expired = time.After(expiration * 9 / 10)
+
+		case a.tok <- tokenResponse{Token: token}:
 			// Someone has read the token, nothing to do.
 			// The next iteration will send the token to the channel again.
-		case a.tok <- token:
 		}
 	}
 }
