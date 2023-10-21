@@ -38,6 +38,8 @@ If web apps could sweat, they would.
 
 On one end, hoards of client sessions request continuous flow of data. On the other end, third-party APIs set rigorous access rules that require using short-lived access tokens.
 
+![Your app server, serving clients and accessing third-party APIs, needs to keep the access token fresh](refresh.svg)
+
 Let an API access token expire and chaos starts. All open client sessions would run into errors! Bad user experience. So better keep the token fresh.
 
 However, do not let each client session request a new access token for the same API. Only the last request wins, and all others have received a token that is already invalidated by subsequent refresh requests.
