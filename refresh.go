@@ -30,13 +30,13 @@ tags = ["refresh", "goroutine", "channel"]
 articletypes = ["Tutorial"]
 +++
 
-An access token should be initialized and refreshed from a central place, yet be available to upteenth of client sessions. Dynamic futures to the rescue.
+An access token should be initialized and refreshed from a central place, yet be available to umpteenth of client sessions. Dynamic futures to the rescue.
 
 <!--more-->
 
 If web apps could sweat, they would.
 
-On one end, hoardes of client sessions request continuous flow of data. On the other end, third-party APIs set rigorous access rules that require using short-lived access tokens.
+On one end, hoards of client sessions request continuous flow of data. On the other end, third-party APIs set rigorous access rules that require using short-lived access tokens.
 
 Let an API access token expire and chaos starts. All open client sessions would run into errors! Bad user experience. So better keep the token fresh.
 
@@ -68,12 +68,12 @@ In this article, I want to leverage this mechanism to create a future that updat
 
 - All concurrent work shall be hidden from the client. No channels or other concurrency constructs shall leak to the client side. The client shall be able to always get a current and valid access token by a simple method call.
 - Use standard Go concurrency ingredients only.
-- Use the standard libary only. (This rules out using [`singleflight`](https://pkg.go.dev/golang.org/x/sync/singleflight) or similar packages.)
+- Use the standard library only. (This rules out using [`singleflight`](https://pkg.go.dev/golang.org/x/sync/singleflight) or similar packages.)
 
 
 ## The challenge: orchestrating token refreshes and client requests
 
-Scenario: A web app serves many clients. It also needs to call a third-party web API to fetch various data. This third-party API requires an access token that expires after a certain time. The web app must refresh the token on time, or else it would not be able to fetch more data from the API, and the client sesisons would be blocked.
+Scenario: A web app serves many clients. It also needs to call a third-party web API to fetch various data. This third-party API requires an access token that expires after a certain time. The web app must refresh the token on time, or else it would not be able to fetch more data from the API, and the client sessions would be blocked.
 
 Furthermore, the web app must abide by the following rules:
 1. The solution must not provide a client with an expired token
@@ -104,19 +104,19 @@ value1 := <-c
 value2 := <-c  // Read again, get the same value again
 ```
 
-## How serve a value and compute a new one in the background
+## How to serve a value and compute a new one in the background
 
-The above future implementation computes the result only once. To update the result in the background, we need a way of reading and writing the result in a concurency-safe way.
+The above future implementation computes the result only once. To update the result in the background, we need a way of reading and writing the result in a concurrency-safe way.
 
 Did anyone shout, "mutex!"?
 
-Mutexes do work, but there is a better way: a `select` statement.
+Mutexes do work, but there is a better way: **a `select` statement.**
 
 As a quick recap, a `select` statement is like a `switch` statement, except that the `case` conditions are channel read or write operations. That is, every `case` condition attempts to either read from or write to a channel. If a channel is not ready, the affected `case` blocks until the channel is ready. If more than one channel become ready for reading or writing, the `select` statement randomly selects one of the unblocked `case`s for execution. The other `case`s remain blocked until the running case completes.
 
 This mechanism provides an elegant way of serializing access to resources and avoid data races, without having to use mutexes.
 
-Here is how the `select` statement can help implementing our "dynamic future":
+Here is how the `select` statement can help implement our "dynamic future":
 
 ```go
 go func(token chan<- string) {
@@ -137,8 +137,8 @@ go func(token chan<- string) {
 
 ### What happens here?
 
-1. When the goroutine starts, it fetches an inital access token by calling function `authorize()` (that I will not define here, let's assume some black-box token refreshing logic). The function returns a new token and the token's lifespan (as a duration).
-2. Then the goroutine starts a timer that expires shortly before the token expires.
+1. When the goroutine starts, it fetches an initial access token by calling function `authorize()` (that I will not define here, let's assume some black-box token refreshing logic). The function returns a new token and the token's lifespan (as a duration).
+2. Then, the goroutine starts a timer that expires shortly before the token expires.
 3. The goroutine enters an infinite loop that consists of a `select` statement with two cases.
 4. The first case unblocks when a client attempts to read the `token` channel. The case sends the current token to the channel, and the loop starts over. Everything happens in the case condition, hence the case body is empty.
 5. The second case unblocks when the timer fires. It fetches a new token and sets a new timer.
@@ -149,7 +149,7 @@ That's it! That's all the magic of our self-updating future.
 
 The code makes use of the fundamental property of the `select` statement that I mentioned above.
 
-The `select` statement randomly selects one of the unblocked `case`s for execution. It is not possible that two `case`s are unblocked at the same time. No data race can happen from simultanous access to `tok` from both cases.
+The `select` statement randomly selects one of the unblocked `case`s for execution. It is not possible that two `case`s are unblocked at the same time. No data race can happen from simultaneous access to `tok` from both cases.
 
 Hence, if a client reads the `token` channel, it can do so undisturbed.
 
@@ -162,7 +162,7 @@ But theory is cheap, so let's go through a working demo code.
 
 // ## Imports and globals
 //
-// The package name must be `main` to make the code run in the Go playground. In real life ,the package would be a library package named, for example, `auth`.
+// The package name must be `main` to make the code run in the Go playground. In real life, the package would be a library package named, for example, `auth`.
 package main
 
 // None of these packages (except `time`) are actually required for the token refreshing code. They are used by the code that simulates the token refresh API, the test code, and for printing out what's going on.
@@ -177,7 +177,7 @@ import (
 )
 
 const (
-	// We want to refresh the token *before* it expires. The lifeSpanSafetyMargin shall provide enough time for this.
+	// We want to refresh the token *before* it expires. The `lifeSpanSafetyMargin` duration shall provide enough time for this.
 	// For the simulation, it is set to an unrealistically small value, to make the test run fast.
 	lifeSpanSafetyMargin = 10 * time.Millisecond
 )
@@ -258,11 +258,11 @@ But the simulated authorization endpoint is not very stable. With a probability 
 
 When this happens, the function simulates a half-heartedly backoff strategy ("sleep, then try just once again") that fails half of the time. (Exponential backoff with jitter, anyone? Take it as a homework assignment.)
 
-Feel free to skip reading through that part of the code, it is not relevant for the implmentation. For any production purposes, you would insert a real API call here.
+Feel free to skip reading through that part of the code, it is not relevant for the implementation. For any production purposes, you would insert a real API call here.
 
 */
 
-// These constants help simulating a not very reliable authorization endpoint.
+// These constants help simulate a not very reliable authorization endpoint.
 // To finish the tests quickly, the durations are set to absurdly short values.
 // (Typically, access tokens of web APIs have lifespans that are counted in
 // minutes, not milliseconds.)
@@ -373,9 +373,9 @@ func TestToken_get(t *testing.T) {
 /*
 ## Run the code
 
-The code runs fine in the Go playground and therefore is just [one click away]().
+The code runs fine in the Go playground and therefore is just [one click away](https://go.dev/play/p/wQYSNSrkbdi).
 
-Alternatively, clone the code repository and run `go test`.
+Alternatively, clone the [code repository](https://github.com/AppliedGo/refresh) and run `go test`.
 
 ```
 git clone https://github.com/appliedgo/refresh
