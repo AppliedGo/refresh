@@ -24,7 +24,7 @@ description = "Automatically refresh data in the background with a goroutine, ch
 author = "Christoph Berger"
 email = "chris@appliedgo.net"
 date = "2023-10-18"
-draft = "true"
+draft = "false"
 categories = ["Concurrent Programming"]
 tags = ["refresh", "goroutine", "channel"]
 articletypes = ["Tutorial"]
@@ -169,11 +169,13 @@ package main
 
 // None of these packages (except `time`) are actually required for the token refreshing code. They are used by the code that simulates the token refresh API, the test code, and for printing out what's going on.
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"log"
 	rnd "math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -199,7 +201,7 @@ type Token struct {
 }
 
 // Method `refreshToken` fetches a new access token from the authorization API if there is none yet or if the current one expires. It sends the results (a token or an error) to the `accessToken` channel.
-func (a *Token) refreshToken() {
+func (a *Token) refreshToken(ctx context.Context) {
 	var token string
 	var expiration time.Duration
 	var err error
@@ -227,18 +229,19 @@ func (a *Token) refreshToken() {
 			}
 			// Set a new timer to fire when 90% of the expiration duration has passed.
 			expired = time.After(expiration - lifeSpanSafetyMargin)
-
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
 // The Token constructor receives the authorization function to call. It takes care of spawning the goroutine that refreshes the token in the background.
-func NewToken(auth func() (string, time.Duration, error)) *Token {
+func NewToken(ctx context.Context, auth func() (string, time.Duration, error)) *Token {
 	a := &Token{
 		accessToken: make(chan tokenResponse),
 		authorize:   auth,
 	}
-	go a.refreshToken() // This call sets a.token and a.apiErr.
+	go a.refreshToken(ctx) // This call sets a.token and a.apiErr.
 	return a
 }
 
@@ -276,8 +279,8 @@ const (
 	apiErrorDuration    = tokenLifeSpan * 150 / 100
 )
 
-// `tempError` is set to `true` during a simulated transient API/network outage.
-var tempError bool
+// `tempError` is set to `true` during a simulated transient API/network outage. To avoid races, it is an atomic value.
+var tempError atomic.Bool
 
 // `authFunc()` simulates fetching a new access token that expires after `lifespan` milliseconds.
 func authFunc() (token string, lifespan time.Duration, err error) {
@@ -294,7 +297,7 @@ func authFunc() (token string, lifespan time.Duration, err error) {
 	// Simulate an API call error with a probability of `apiFailureRate`.
 	// The error lasts for `apiErrorDuration`, then disappears.
 	// The code pretends to do a backoff strategy that fails half of the time.
-	if rnd.Float64() < apiFailureRate && !tempError {
+	if !tempError.Load() && rnd.Float64() < apiFailureRate {
 		log.Println("API error")
 		log.Println("Backing off...")
 		time.Sleep(tokenLifeSpan)
@@ -302,20 +305,20 @@ func authFunc() (token string, lifespan time.Duration, err error) {
 		if rnd.Float64() < 0.5 {
 			// Backoff strategy was not successful
 			log.Println("API is still not back, giving up")
-			tempError = true
+			tempError.Store(true)
 
 			// The API/network outage resolves itself after `apiErrorDuration`.
 			go func() {
 				<-time.After(apiErrorDuration)
 				log.Println("API error disappeared")
-				tempError = false
+				tempError.Store(false)
 			}()
 		} else {
 			log.Println("API error disappeared during backoff")
 		}
 	}
 
-	if tempError {
+	if tempError.Load() {
 		return "", tokenLifeSpan, fmt.Errorf("temporary API error")
 	}
 
@@ -334,7 +337,9 @@ Instead of building a complete web app with an HTTP server, handlers, and more, 
 func TestToken_get(t *testing.T) {
 	log.SetFlags(0) // no extra log info
 	log.Println("Starting test")
-	a := NewToken(authFunc)
+	ctx, cancel := context.WithCancel(context.Background())
+	a := NewToken(ctx, authFunc)
+	defer cancel()
 
 	// A test client requests an API token regularly, so that it can call the API.
 	client := func(n int, token *Token, done <-chan struct{}, wg *sync.WaitGroup) {
@@ -399,6 +404,12 @@ A tested-and-proven backup strategy for production code is "exponential backoff 
 ### Add contexts as needed
 
 I omitted any `context` handling for brevity. Almost always, such code runs in a context that uses a `context` (pun not intended, the text formatting should give a hint on what I mean). You might want to cancel the token refresh loop (for example, on service shutdown) or add a timeout.
+
+## FAQ
+
+### But... why not mutexes?!
+
+The code can be written with mutexes as well. I decided against this because this article shall showcase the use of Go's concurrency primitives—goroutines, channels, and the select statement. Moreover, while mutexes may appear easy enough for simple scenarios like this one, they tend to become complicated and error-prone in more complex scenarios. (I am not saying that sticking with channels and `select` statements guarantees easy concurrency.
 
 ## Links
 
