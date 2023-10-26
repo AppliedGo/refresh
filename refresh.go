@@ -187,6 +187,8 @@ const (
 	// We want to refresh the token *before* it expires. The `lifeSpanSafetyMargin` duration shall provide enough time for this.
 	// For the simulation, it is set to an unrealistically small value, to make the test run fast.
 	lifeSpanSafetyMargin = 10 * time.Millisecond
+	// If the token cannot be refreshed, we want to retry after a short delay.
+	retryDelay = 11 * time.Millisecond
 )
 
 // The authorization API returns either a token or an error. We collect either of these in a `tokenResponse` and pass the result on to the client.
@@ -210,6 +212,7 @@ func (a *Token) refreshToken(ctx context.Context) {
 	var err error
 
 	// Set the initial token, before any client can request it.
+	// `authorize()` is defined below. Its purpose is to fetch a new token from an authorization endpoint, including the token's lifespan.
 	token, expiration, err = a.authorize()
 
 	// Set a new timer to fire when 90% of the expiration duration has passed. We want a new token *before* the current one expires.
@@ -227,11 +230,15 @@ func (a *Token) refreshToken(ctx context.Context) {
 			token, expiration, err = a.authorize()
 			if err != nil {
 				log.Println("Error refreshing token:", err)
+				// If the token cannot be fetched, retry frequently instead of waiting for the token's normal timeout (which could be minutes away).
+				expiration = retryDelay
 			} else {
 				log.Println("Token refreshed")
 			}
-			// Set a new timer to fire when 90% of the expiration duration has passed.
+			// Set a new timer to fire when 90% of the expiration duration has passed, or, if the token could not be refreshed, to fire when the retry delay has passed.
 			expired = time.After(expiration - lifeSpanSafetyMargin)
+
+		// The context has been canceled. Stop the goroutine.
 		case <-ctx.Done():
 			return
 		}
@@ -452,6 +459,8 @@ func (m *MToken) refreshToken(ctx context.Context) {
 
 			if err != nil {
 				log.Println("Error refreshing token:", err)
+				// If the token cannot be fetched, retry frequently instead of waiting for the token's normal timeout (which could be minutes away).
+				expiration = retryDelay
 			} else {
 				log.Println("Token refreshed")
 			}
