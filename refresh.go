@@ -50,7 +50,7 @@ I am sure that there are many ways to do this, but here is one that is quick to 
 
 ## Dynamic futures
 
-If the word "futures" lets you think of our planet's potential destinies rather than programming paradigms, the article about futures in Go[^futures] gets you back on track.
+If the word "futures" lets you think of our planet's potential destinies rather than programming paradigms, the article about [futures in Go][futures] gets you back on track.
 
 TL;DR: A future is a variable whose value does not exist initially but will be available after it gets computed. In Go, a future can be trivially implemented as a goroutine with a result channel.
 
@@ -70,7 +70,7 @@ In this article, I want to leverage this mechanism to create a future that updat
 
 - All concurrent work shall be hidden from the client. No channels or other concurrency constructs shall leak to the client side. The client shall be able to always get a current and valid access token by a simple method call.
 - Use standard Go concurrency ingredients only.
-- Use the standard library only. (This rules out using `singleflight`[^singleflight] or similar packages.)
+- Use the standard library only. (This rules out using [`singleflight`][singleflight] or similar packages.)
 
 
 ## The challenge: orchestrating token refreshes and client requests
@@ -112,7 +112,7 @@ The above future implementation computes the result only once. To update the res
 
 Did anyone shout, "mutex!"?
 
-Mutexes do work, but there is a better way: **a `select` statement.**[^select]
+Mutexes do work, but there is a better way: [**a `select` statement.**][select]
 
 As a quick recap, a `select` statement is like a `switch` statement, except that the `case` conditions are channel read or write operations. That is, every `case` condition attempts to either read from or write to a channel. If a channel is not ready, the affected `case` blocks until the channel is ready. If more than one channel become ready for reading or writing, the `select` statement randomly selects one of the unblocked `case`s for execution. The other `case`s remain blocked until the running case completes.
 
@@ -524,9 +524,9 @@ func TestMTokenGet(t *testing.T) {
 /*
 ## Run the code
 
-The code runs fine in the Go playground and therefore is just one click away[^playground].
+The code runs fine in the Go playground and therefore is just [one click away][playground].
 
-Alternatively, clone the code repository[^repository] and run `go test`.
+Alternatively, clone the [code repository][repository] and run `go test`.
 
 ```
 git clone https://github.com/appliedgo/refresh
@@ -549,7 +549,7 @@ A tested-and-proven backup strategy for production code is "exponential backoff 
 
 You probably don't need to care. The performance difference between sharing data via guarded access versus sharing data via channels is certainly negligible, given that the shared data—an access token—is used for calling an API endpoint (or even multiple endpoints), which is *orders of magnitudes* slower than reading a string shared via mutex-locking or a channel.
 
-But for the sake of it, I have run benchmarks on Token.Get() and MToken.Get(). (The benchmark code is available in the repository[^repository] only.) The results speak for themselves.
+But for the sake of it, I have run benchmarks on Token.Get() and MToken.Get(). (The benchmark code is available [in the repository][repository] only.) The results speak for themselves.
 
 ```sh
 > go test -run NONE -bench=.
@@ -603,17 +603,23 @@ Remember:
 The current solution uses a cancelable context, but the app must ensure to eventually cancel the context. That's an additional burden for the `Token` consumer, unless the consumer already uses a cancelable context that the token refresher can be hooked into.
 
 
-
-
-[^futures]: [Futures in Go • Applied Go](https://appliedgo.net/futures)
-[^singleflight]: [The Singleflight package](https://pkg.go.dev/golang.org/x/sync/singleflight)
-[^select]: [Select statements (Go language specification)](https://go.dev/ref/spec#Select_statements)
-[^repository]: [This code on GitHub](https://github.com/AppliedGo/refresh)
-[^playground]: [Go playground](https://go.dev/play/p/twbbaQ4JZ87)
-
 ## Conclusion
 
 We went from a simple channel-based future to a self-refreshing value. We compared a channel-based approach and an approach using mutexes, and we had a critical look at the token refresher that uses a timer instead of letting API calls run into the token timeout. I hope you had some fun time while reading this article and trying out the code. thank you
+
+## Links
+
+- [Futures in Go • Applied Go][futures]
+- [The Singleflight package][singleflight]
+- [Select statements (Go language specification)][select]
+- [This code on GitHub][repository]
+- [Go playground][playground]
+
+[futures]: https://appliedgo.net/futures
+[singleflight]: https://pkg.go.dev/golang.org/x/sync/singleflight
+[select]: https://go.dev/ref/spec#Select_statements
+[repository]: https://github.com/AppliedGo/refresh
+[playground]: https://go.dev/play/p/jvUlqDwWyxq
 
 **Happy coding!**
 
@@ -624,5 +630,7 @@ Changelog:
 2023-10-25: Add context and an atomic value to address a potential goroutine leak and a race condition.
 
 2023-10-26: Add a mutex version and benchmarks.
+
+2023-10-28: Replace footnotes with Commonmark-compliant link references.
 
 */
